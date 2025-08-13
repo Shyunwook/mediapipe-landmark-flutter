@@ -9,6 +9,9 @@ import UIKit
   private let existThreshold: Float = 0.5
   private let scoreThreshold: Float = 0.5
 
+  // 재사용 가능한 배열들 (메모리 할당 최적화)
+  private var reusableLandmarks: [[String: Any]] = []
+
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
@@ -123,7 +126,7 @@ import UIKit
       options.minHandDetectionConfidence = existThreshold
       options.minHandPresenceConfidence = existThreshold
       options.minTrackingConfidence = scoreThreshold
-      
+
       // [STEP 3] GPU 가속 활성화로 추론 성능 향상
       options.baseOptions.delegate = .GPU
 
@@ -148,7 +151,8 @@ import UIKit
       ]
     }
 
-    var parsedLandmarks: [[String: Any]] = []
+    // 재사용 가능한 배열 초기화 (새 할당 대신 기존 배열 재사용)
+    reusableLandmarks.removeAll(keepingCapacity: true)
     var validLandmarks = 0
 
     // MediaPipe 21개 랜드마크 파싱
@@ -159,7 +163,7 @@ import UIKit
 
       // 유효한 랜드마크인지 확인
       if landmark.x >= 0.0 && landmark.x <= 1.0 && landmark.y >= 0.0 && landmark.y <= 1.0 {
-        parsedLandmarks.append([
+        reusableLandmarks.append([
           "x": x,
           "y": y,
           "z": z,
@@ -172,7 +176,7 @@ import UIKit
     let handednessConfidence = handLandmarkerResult.handedness.first?.first?.score ?? 0.0
 
     return [
-      "landmarks": parsedLandmarks,
+      "landmarks": reusableLandmarks,
       "confidence": Double(handednessConfidence),
       "detected": true,
       "validLandmarks": validLandmarks,

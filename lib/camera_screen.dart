@@ -168,6 +168,7 @@ class _CameraScreenState extends State<CameraScreen> {
         'width': image.width,
         'height': image.height,
       });
+
       if ((result['result']['landmarks'] as List).isNotEmpty) {
         // BuildContext 안전성 체크
         if (!mounted) return;
@@ -177,15 +178,19 @@ class _CameraScreenState extends State<CameraScreen> {
             .map((mark) => Offset(mark['x'] * 393 / 224, mark['y'] * 480 / 224))
             .toList();
 
-        // 좌표 스무딩 적용 (가중평균: 새 프레임 70%, 이전 프레임 30%)
+        // 좌표 스무딩 적용 (in-place 연산으로 메모리 할당 최적화)
         if (_previousLandmarks.isNotEmpty &&
             _previousLandmarks.length == newLandmarks.length) {
-          _landmarks = List.generate(newLandmarks.length, (index) {
-            return Offset(
-              newLandmarks[index].dx * 0.7 + _previousLandmarks[index].dx * 0.3,
-              newLandmarks[index].dy * 0.7 + _previousLandmarks[index].dy * 0.3,
+          // 기존 _landmarks 배열을 재사용하여 in-place로 계산
+          if (_landmarks.length != newLandmarks.length) {
+            _landmarks = List.filled(newLandmarks.length, Offset.zero);
+          }
+          for (int i = 0; i < newLandmarks.length; i++) {
+            _landmarks[i] = Offset(
+              newLandmarks[i].dx * 0.7 + _previousLandmarks[i].dx * 0.3,
+              newLandmarks[i].dy * 0.7 + _previousLandmarks[i].dy * 0.3,
             );
-          });
+          }
         } else {
           _landmarks = newLandmarks;
         }
