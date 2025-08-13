@@ -17,8 +17,14 @@ class _CameraScreenState extends State<CameraScreen> {
   bool _isProcessing = false;
   bool _isRecording = false;
   List<Offset> _landmarks = [];
+  List<Offset> _previousLandmarks = []; // 이전 프레임 랜드마크 저장
 
   CameraController? _controller;
+
+  // 성능 측정을 위한 변수들
+  DateTime? _frameStartTime;
+  List<int> _processingTimes = []; // 처리 시간들을 저장
+  int _frameCount = 0;
 
   Uint8List? _preprocessedImageData;
 
@@ -41,7 +47,7 @@ class _CameraScreenState extends State<CameraScreen> {
     if (cameras.isNotEmpty) {
       _controller = CameraController(
         cameras[1],
-        ResolutionPreset.medium,
+        ResolutionPreset.low,
         enableAudio: false,
       );
 
@@ -77,8 +83,11 @@ class _CameraScreenState extends State<CameraScreen> {
                       Stack(
                         children: [
                           CameraPreview(_controller!),
-                          ..._landmarks.map(
-                            (mark) => LandMarks(position: mark),
+                          RepaintBoundary(
+                            child: CustomPaint(
+                              painter: LandmarkPainter(_landmarks),
+                              size: Size.infinite,
+                            ),
                           ),
                         ],
                       ),
@@ -144,6 +153,10 @@ class _CameraScreenState extends State<CameraScreen> {
   Future<void> _processImage(CameraImage image) async {
     if (_isProcessing) return;
 
+    // 프레임 처리 시작 시간 기록
+    _frameStartTime = DateTime.now();
+    _frameCount++;
+
     setState(() {
       _isProcessing = true;
     });
@@ -158,17 +171,60 @@ class _CameraScreenState extends State<CameraScreen> {
       });
 
       if ((result['result']['landmarks'] as List).isNotEmpty) {
-        _landmarks = (result['result']['landmarks'] as List)
-            .map((mark) => Offset(mark['x'] * 393 / 224, mark['y'] * 524 / 224))
+        // BuildContext 안전성 체크
+        if (!mounted) return;
+        // iOS에서 이미 224 스케일로 변환된 좌표를 화면 크기에 맞게 스케일링
+
+        final newLandmarks = (result['result']['landmarks'] as List)
+            .map((mark) => Offset(mark['x'] * 393 / 224, mark['y'] * 480 / 224))
             .toList();
+
+        // 좌표 스무딩 적용 (가중평균: 새 프레임 70%, 이전 프레임 30%)
+        if (_previousLandmarks.isNotEmpty &&
+            _previousLandmarks.length == newLandmarks.length) {
+          _landmarks = List.generate(newLandmarks.length, (index) {
+            return Offset(
+              newLandmarks[index].dx * 0.7 + _previousLandmarks[index].dx * 0.3,
+              newLandmarks[index].dy * 0.7 + _previousLandmarks[index].dy * 0.3,
+            );
+          });
+        } else {
+          _landmarks = newLandmarks;
+        }
+
+        _previousLandmarks = List.from(_landmarks);
       } else {
         _landmarks.clear();
+        _previousLandmarks.clear();
       }
       setState(() {});
 
       setState(() {
         _preprocessedImageData = result['processedImageData'];
       });
+
+      // 처리 완료 시간 기록 및 성능 로깅
+      if (_frameStartTime != null) {
+        final processingTime = DateTime.now()
+            .difference(_frameStartTime!)
+            .inMilliseconds;
+        _processingTimes.add(processingTime);
+
+        // 최근 30프레임의 평균 처리 시간 계산 및 출력
+        if (_processingTimes.length > 30) {
+          _processingTimes.removeAt(0);
+        }
+
+        if (_frameCount % 30 == 0) {
+          final avgTime =
+              _processingTimes.reduce((a, b) => a + b) /
+              _processingTimes.length;
+          final fps = 1000 / avgTime;
+          debugPrint(
+            "🔥 성능 측정 (최근 30프레임): 평균 처리시간=${avgTime.toStringAsFixed(1)}ms, FPS=${fps.toStringAsFixed(1)}",
+          );
+        }
+      }
     } catch (e) {
       debugPrint("Error processing image: $e");
     } finally {
@@ -179,11 +235,9 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   Uint8List _cameraImageToBytes(CameraImage image) {
-    final WriteBuffer allBytes = WriteBuffer();
-    for (final Plane plane in image.planes) {
-      allBytes.putUint8List(plane.bytes);
-    }
-    return allBytes.done().buffer.asUint8List();
+    // [STEP 2] YUV420에서 첫 번째 plane(Y)만 사용하여 성능 최적화
+    // Y plane은 휘도 정보만 포함하지만 hand landmark 검출에 충분함
+    return image.planes[0].bytes;
   }
 
   void _startImageStream() {
@@ -215,27 +269,47 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 }
 
-class LandMarks extends StatelessWidget {
-  final Offset position;
+// 최적화된 랜드마크 렌더링 (성능 개선)
+class LandmarkPainter extends CustomPainter {
+  final List<Offset> landmarks;
+  static Paint? _cachedPaint;
+  static Paint? _cachedShadowPaint;
 
-  const LandMarks({super.key, required this.position});
+  LandmarkPainter(this.landmarks);
 
   @override
-  Widget build(BuildContext context) {
-    return Positioned(
-      left: position.dx,
-      top: position.dy,
-      child: Container(
-        width: 12,
-        height: 12,
-        decoration: const BoxDecoration(
-          color: Colors.red,
-          shape: BoxShape.circle,
-          boxShadow: [
-            BoxShadow(color: Colors.white, blurRadius: 2, spreadRadius: 1),
-          ],
-        ),
-      ),
-    );
+  void paint(Canvas canvas, Size size) {
+    if (landmarks.isEmpty) return;
+
+    // Paint 객체 캐싱으로 객체 생성 오버헤드 제거
+    _cachedPaint ??= Paint()
+      ..color = Colors.red
+      ..style = PaintingStyle.fill
+      ..isAntiAlias = false; // 안티앨리어싱 비활성화로 성능 향상
+
+    _cachedShadowPaint ??= Paint()
+      ..color = Colors.white.withValues(alpha: 0.8)
+      ..style = PaintingStyle.fill
+      ..isAntiAlias = false;
+
+    // 배치 렌더링 최적화
+    for (final landmark in landmarks) {
+      // 그림자 효과
+      canvas.drawCircle(landmark, 6.5, _cachedShadowPaint!);
+      // 메인 원
+      canvas.drawCircle(landmark, 5.5, _cachedPaint!);
+    }
+  }
+
+  @override
+  bool shouldRepaint(LandmarkPainter oldDelegate) {
+    // 좌표가 크게 변했을 때만 다시 그리기
+    if (landmarks.length != oldDelegate.landmarks.length) return true;
+
+    for (int i = 0; i < landmarks.length; i++) {
+      final distance = (landmarks[i] - oldDelegate.landmarks[i]).distance;
+      if (distance > 1.0) return true; // 1픽셀 이상 변화시에만 다시 그리기
+    }
+    return false;
   }
 }

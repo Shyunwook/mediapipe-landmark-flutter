@@ -130,6 +130,9 @@ import UIKit
       options.minHandDetectionConfidence = existThreshold
       options.minHandPresenceConfidence = existThreshold
       options.minTrackingConfidence = scoreThreshold
+      
+      // [STEP 3] GPU 가속 활성화로 추론 성능 향상
+      options.baseOptions.delegate = .GPU
 
       handLandmarker = try HandLandmarker(options: options)
 
