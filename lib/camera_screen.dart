@@ -56,7 +56,7 @@ class _CameraScreenState extends State<CameraScreen> {
 
   Future<void> _loadModel() async {
     try {
-      await channel.invokeMethod('load');
+      await channel.invokeMethod('load_gesture');
       setState(() {
         _isModelLoaded = true;
       });

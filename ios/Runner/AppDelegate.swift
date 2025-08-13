@@ -5,6 +5,8 @@ import UIKit
 @main
 @objc class AppDelegate: FlutterAppDelegate {
   private var handLandmarker: HandLandmarker?
+  private var gestureRecognizer: GestureRecognizer?
+
   private let inputSize = 224
   private let existThreshold: Float = 0.5
   private let scoreThreshold: Float = 0.5
@@ -24,8 +26,10 @@ import UIKit
     channel.setMethodCallHandler {
       [weak self] (call: FlutterMethodCall, result: @escaping FlutterResult) in
       switch call.method {
-      case "load":
-        self?.loadModel(result: result)
+      case "load_landmark":
+        self?.loadLandmarkModel(result: result)
+      case "load_gesture":
+        self?.loadGestureModel(result: result)
       case "inference":
         self?.runInference(call: call, result: result)
       default:
@@ -111,11 +115,18 @@ import UIKit
     }
   }
 
-  private func loadModel(result: FlutterResult) {
+  private func loadLandmarkModel(result: FlutterResult) {
     do {
       guard let modelPath = Bundle.main.path(forResource: "hand_landmarker", ofType: "task") else {
-        NSLog("Model file not found at path: hand_landmarker.task")
-        result(FlutterError(code: "MODEL_NOT_FOUND", message: "Model file not found", details: nil))
+        // // 사용 가능한 모든 파일 나열
+        // let bundle = Bundle.main
+        // let allFiles = bundle.paths(forResourcesOfType: nil, inDirectory: nil)
+        // NSLog("Available files in bundle: \(allFiles)")
+
+        result(
+          FlutterError(
+            code: "MODEL_NOT_FOUND", message: "Model file 'hand_landmarker.task' not found",
+            details: nil))
         return
       }
 
@@ -131,6 +142,43 @@ import UIKit
       options.baseOptions.delegate = .GPU
 
       handLandmarker = try HandLandmarker(options: options)
+
+      result("Model loaded successfully")
+    } catch {
+      NSLog("Model load error: \(error.localizedDescription)")
+      result(
+        FlutterError(code: "MODEL_LOAD_ERROR", message: error.localizedDescription, details: nil))
+    }
+  }
+
+  private func loadGestureModel(result: FlutterResult) {
+    do {
+      guard let modelPath = Bundle.main.path(forResource: "gesture_recognizer", ofType: "task")
+      else {
+        // // 사용 가능한 모든 파일 나열
+        // let bundle = Bundle.main
+        // let allFiles = bundle.paths(forResourcesOfType: nil, inDirectory: nil)
+        // NSLog("Available files in bundle: \(allFiles)")
+
+        result(
+          FlutterError(
+            code: "MODEL_NOT_FOUND", message: "Model file 'gesture_recognizer.task' not found",
+            details: nil))
+        return
+      }
+
+      let options = GestureRecognizerOptions()
+      options.baseOptions.modelAssetPath = modelPath
+      options.runningMode = .image
+      options.numHands = 2
+      options.minHandDetectionConfidence = existThreshold
+      options.minHandPresenceConfidence = existThreshold
+      options.minTrackingConfidence = scoreThreshold
+
+      // [STEP 3] GPU 가속 활성화로 추론 성능 향상
+      options.baseOptions.delegate = .GPU
+
+      gestureRecognizer = try GestureRecognizer(options: options)
 
       result("Model loaded successfully")
     } catch {
