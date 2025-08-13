@@ -333,10 +333,10 @@ class _CameraScreenState extends State<CameraScreen> {
     if ((result['result']['landmarks'] as List).isNotEmpty) {
       // BuildContext 안전성 체크
       if (!mounted) return;
-      // iOS에서 이미 224 스케일로 변환된 좌표를 화면 크기에 맞게 스케일링
+      // iOS에서 정규화된 좌표(0.0-1.0)를 직접 화면 크기에 곱함
 
       final newLandmarks = (result['result']['landmarks'] as List)
-          .map((mark) => Offset(mark['x'] * 393 / 224, mark['y'] * 480 / 224))
+          .map((mark) => Offset(mark['x'] * 393, mark['y'] * 480))
           .toList();
 
       // 좌표 스무딩 적용 (in-place 연산으로 메모리 할당 최적화)
@@ -374,7 +374,7 @@ class _CameraScreenState extends State<CameraScreen> {
       if (landmarksArray.isNotEmpty) {
         // 첫 번째 손의 랜드마크만 사용
         final firstHandLandmarks = landmarksArray[0] as List;
-        // gesture recognition에서 landmarks는 이미 정규화된 좌표 (0.0-1.0)이므로 직접 화면 크기에 곱함
+        // iOS에서 정규화된 좌표(0.0-1.0)를 직접 화면 크기에 곱함 (landmark와 동일한 방식)
         final newLandmarks = firstHandLandmarks
             .map((mark) => Offset(mark['x'] * 393, mark['y'] * 480))
             .toList();

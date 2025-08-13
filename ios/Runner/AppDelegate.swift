@@ -280,10 +280,10 @@ import UIKit
     reusableLandmarks.removeAll(keepingCapacity: true)
     var validLandmarks = 0
 
-    // MediaPipe 21개 랜드마크 파싱
+    // MediaPipe 21개 랜드마크 파싱 (정규화된 좌표 그대로 반환)
     for landmark in firstHand {
-      let x = Double(landmark.x) * Double(inputSize)  // 정규화된 좌표를 224 스케일로 변환
-      let y = Double(landmark.y) * Double(inputSize)
+      let x = Double(landmark.x)  // 정규화된 좌표 (0.0-1.0)
+      let y = Double(landmark.y)
       let z = Double(landmark.z ?? 0.0)
 
       // 유효한 랜드마크인지 확인
@@ -361,7 +361,7 @@ import UIKit
 
       for landmark in handLandmarks {
         handLandmarkData.append([
-          "x": Double(landmark.x),
+          "x": Double(landmark.x),  // 정규화된 좌표 (0.0-1.0)
           "y": Double(landmark.y),
           "z": Double(landmark.z ?? 0.0),
         ])
