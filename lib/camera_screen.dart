@@ -169,7 +169,6 @@ class _CameraScreenState extends State<CameraScreen> {
         'width': image.width,
         'height': image.height,
       });
-
       if ((result['result']['landmarks'] as List).isNotEmpty) {
         // BuildContext 안전성 체크
         if (!mounted) return;
@@ -303,13 +302,7 @@ class LandmarkPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(LandmarkPainter oldDelegate) {
-    // 좌표가 크게 변했을 때만 다시 그리기
-    if (landmarks.length != oldDelegate.landmarks.length) return true;
-
-    for (int i = 0; i < landmarks.length; i++) {
-      final distance = (landmarks[i] - oldDelegate.landmarks[i]).distance;
-      if (distance > 1.0) return true; // 1픽셀 이상 변화시에만 다시 그리기
-    }
-    return false;
+    // 항상 다시 그리기 (디버깅용)
+    return true;
   }
 }
