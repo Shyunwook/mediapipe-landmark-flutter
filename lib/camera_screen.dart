@@ -21,12 +21,11 @@ class _CameraScreenState extends State<CameraScreen> {
 
   CameraController? _controller;
 
-  // 성능 측정을 위한 변수들
+  // 성능 측정을 위한 변수들 (원형 버퍼 최적화)
   DateTime? _frameStartTime;
-  List<int> _processingTimes = []; // 처리 시간들을 저장
+  final List<int> _processingTimes = List.filled(30, 0); // 고정 크기 원형 버퍼
   int _frameCount = 0;
-
-  Uint8List? _preprocessedImageData;
+  int _bufferIndex = 0;
 
   @override
   void initState() {
@@ -196,28 +195,19 @@ class _CameraScreenState extends State<CameraScreen> {
         _landmarks.clear();
         _previousLandmarks.clear();
       }
-      setState(() {});
-
-      setState(() {
-        _preprocessedImageData = result['processedImageData'];
-      });
 
       // 처리 완료 시간 기록 및 성능 로깅
       if (_frameStartTime != null) {
         final processingTime = DateTime.now()
             .difference(_frameStartTime!)
             .inMilliseconds;
-        _processingTimes.add(processingTime);
 
-        // 최근 30프레임의 평균 처리 시간 계산 및 출력
-        if (_processingTimes.length > 30) {
-          _processingTimes.removeAt(0);
-        }
+        // 원형 버퍼에 저장 (O(1) 연산)
+        _processingTimes[_bufferIndex] = processingTime;
+        _bufferIndex = (_bufferIndex + 1) % 30;
 
         if (_frameCount % 30 == 0) {
-          final avgTime =
-              _processingTimes.reduce((a, b) => a + b) /
-              _processingTimes.length;
+          final avgTime = _processingTimes.reduce((a, b) => a + b) / 30;
           final fps = 1000 / avgTime;
           debugPrint(
             "🔥 성능 측정 (최근 30프레임): 평균 처리시간=${avgTime.toStringAsFixed(1)}ms, FPS=${fps.toStringAsFixed(1)}",

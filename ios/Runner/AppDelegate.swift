@@ -79,16 +79,9 @@ import UIKit
               // 결과 파싱
               let parseResult = self.parseMediaPipeResults(handLandmarkerResult)
 
-              // PNG 또는 JPEG 포맷으로 인코딩
-              guard let processedImageData = uiImage.pngData() else {
-                // 인코딩 실패 처리
-                return
-              }
-
               DispatchQueue.main.async {
                 result([
                   "success": true,
-                  "processedImageData": FlutterStandardTypedData(bytes: processedImageData),
                   "result": parseResult,
                 ])
               }
@@ -146,10 +139,7 @@ import UIKit
 
   private func parseMediaPipeResults(_ handLandmarkerResult: HandLandmarkerResult) -> [String: Any]
   {
-    NSLog("MediaPipe result - hands detected: \(handLandmarkerResult.landmarks.count)")
-
     guard let firstHand = handLandmarkerResult.landmarks.first else {
-      NSLog("No hands detected in MediaPipe result")
       return [
         "landmarks": [],
         "confidence": 0.0,
@@ -157,8 +147,6 @@ import UIKit
         "validLandmarks": 0,
       ]
     }
-
-    NSLog("First hand landmarks count: \(firstHand.count)")
 
     var parsedLandmarks: [[String: Any]] = []
     var validLandmarks = 0
@@ -182,8 +170,6 @@ import UIKit
 
     // 첫 번째 손의 handedness confidence 사용
     let handednessConfidence = handLandmarkerResult.handedness.first?.first?.score ?? 0.0
-
-    NSLog("Handedness confidence: \(handednessConfidence), Valid landmarks: \(validLandmarks)")
 
     return [
       "landmarks": parsedLandmarks,
