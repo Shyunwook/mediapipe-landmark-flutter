@@ -30,8 +30,10 @@ import UIKit
         self?.loadLandmarkModel(result: result)
       case "load_gesture":
         self?.loadGestureModel(result: result)
-      case "inference":
-        self?.runInference(call: call, result: result)
+      case "inference_landmark":
+        self?.runInferenceLandmark(call: call, result: result)
+      case "inference_gesture":
+        self?.runInferenceGesture(call: call, result: result)
       default:
         result(FlutterMethodNotImplemented)
       }
@@ -42,7 +44,7 @@ import UIKit
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
-  private func runInference(call: FlutterMethodCall, result: @escaping FlutterResult) {
+  private func runInferenceLandmark(call: FlutterMethodCall, result: @escaping FlutterResult) {
     guard let handLandmarker = handLandmarker else {
       result(FlutterError(code: "NO_MODEL", message: "Model not loaded", details: nil))
       return
@@ -84,7 +86,83 @@ import UIKit
               // MediaPipe 추론 실행
               let handLandmarkerResult = try handLandmarker.detect(image: mpImage)
               // 결과 파싱
-              let parseResult = self.parseMediaPipeResults(handLandmarkerResult)
+              let parseResult = self.parseLandmarkResult(handLandmarkerResult)
+
+              DispatchQueue.main.async {
+                result([
+                  "success": true,
+                  "result": parseResult,
+                ])
+              }
+
+            } else {
+              result("Inference Fail")
+            }
+          } catch {
+            DispatchQueue.main.async {
+              result(
+                FlutterError(
+                  code: "INFERENCE_ERROR", message: error.localizedDescription, details: nil)
+              )
+            }
+          }
+        }
+      } catch {
+        DispatchQueue.main.async {
+          result(
+            FlutterError(code: "INFERENCE_ERROR", message: error.localizedDescription, details: nil)
+          )
+        }
+      }
+    }
+  }
+
+  private func runInferenceGesture(call: FlutterMethodCall, result: @escaping FlutterResult) {
+    guard let gestureRecognizer = gestureRecognizer else {
+      result(FlutterError(code: "NO_MODEL", message: "Model not loaded", details: nil))
+      return
+    }
+
+    guard let args = call.arguments as? [String: Any],
+      let imageData = args["imageData"] as? FlutterStandardTypedData,
+      let width = args["width"] as? Int,
+      let height = args["height"] as? Int
+    else {
+      result(FlutterError(code: "INVALID_ARGS", message: "Invalid arguments", details: nil))
+      return
+    }
+
+    DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+      guard let self = self else { return }
+
+      do {
+        /// UIImage(data:)는 Raw RGB/YUV 바이트를 직접 읽지 못합니다.
+        /// camera 패키지의 CameraImage에서 얻은 bytes는 대부분 YUV420 또는 BGRA8888 "raw" 픽셀 데이터입니다.
+        /// 이건 파일 포맷(JPEG, PNG)이 아니라 그냥 메모리에 나열된 픽셀 값이라,
+        /// UIImage(data:)가 이해할 수 없습니다 → 그래서 nil 반환.
+        /// =>  iOS에서 Raw YUV/BGRA를 UIImage로 변환
+        imageData.data.withUnsafeBytes { ptr in
+          let context = CGContext(
+            data: UnsafeMutableRawPointer(mutating: ptr.baseAddress!),
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+          )
+          do {
+            if let cgImage = context?.makeImage() {
+              let uiImage = UIImage(cgImage: cgImage)
+              let mpImage = try MPImage(uiImage: uiImage)
+
+              // MediaPipe 추론 실행
+              let gestureRecognizerResult = try gestureRecognizer.recognize(image: mpImage)
+              // 결과 파싱
+              let parseResult = self.parseGestureResult(gestureRecognizerResult)
+              
+              // 디버깅을 위한 로그 출력
+              NSLog("Gesture result: \(parseResult)")
 
               DispatchQueue.main.async {
                 result([
@@ -188,8 +266,7 @@ import UIKit
     }
   }
 
-  private func parseMediaPipeResults(_ handLandmarkerResult: HandLandmarkerResult) -> [String: Any]
-  {
+  private func parseLandmarkResult(_ handLandmarkerResult: HandLandmarkerResult) -> [String: Any] {
     guard let firstHand = handLandmarkerResult.landmarks.first else {
       return [
         "landmarks": [],
@@ -229,6 +306,89 @@ import UIKit
       "detected": true,
       "validLandmarks": validLandmarks,
       "presenceConfidence": Double(handednessConfidence),
+    ]
+  }
+
+  private func parseGestureResult(_ gestureRecognizerResult: GestureRecognizerResult) -> [String:
+    Any]
+  {
+    guard !gestureRecognizerResult.gestures.isEmpty,
+      let firstHandGestures = gestureRecognizerResult.gestures.first
+    else {
+      return [
+        "gestures": [],
+        "handedness": [],
+        "landmarks": [],
+        "worldLandmarks": [],
+        "detected": false,
+      ]
+    }
+
+    var gestures: [[String: Any]] = []
+    var handedness: [[String: Any]] = []
+    var landmarks: [[[String: Any]]] = []
+    var worldLandmarks: [[[String: Any]]] = []
+
+    // Parse gestures for each detected hand
+    for (handIndex, handGestures) in gestureRecognizerResult.gestures.enumerated() {
+      var handGestureData: [[String: Any]] = []
+
+      for gestureCategory in handGestures {
+        handGestureData.append([
+          "categoryName": gestureCategory.categoryName,
+          "score": Double(gestureCategory.score)
+        ])
+      }
+      gestures.append(contentsOf: handGestureData)
+    }
+
+    // Parse handedness
+    for (handIndex, handHandedness) in gestureRecognizerResult.handedness.enumerated() {
+      var handHandednessData: [[String: Any]] = []
+
+      for handednessCategory in handHandedness {
+        handHandednessData.append([
+          "categoryName": handednessCategory.categoryName,
+          "score": Double(handednessCategory.score)
+        ])
+      }
+      handedness.append(contentsOf: handHandednessData)
+    }
+
+    // Parse landmarks (screen coordinates)
+    for handLandmarks in gestureRecognizerResult.landmarks {
+      var handLandmarkData: [[String: Any]] = []
+
+      for landmark in handLandmarks {
+        handLandmarkData.append([
+          "x": Double(landmark.x),
+          "y": Double(landmark.y),
+          "z": Double(landmark.z ?? 0.0),
+        ])
+      }
+      landmarks.append(handLandmarkData)
+    }
+
+    // Parse world landmarks (real-world 3D coordinates)
+    for handWorldLandmarks in gestureRecognizerResult.worldLandmarks {
+      var handWorldLandmarkData: [[String: Any]] = []
+
+      for worldLandmark in handWorldLandmarks {
+        handWorldLandmarkData.append([
+          "x": Double(worldLandmark.x),
+          "y": Double(worldLandmark.y),
+          "z": Double(worldLandmark.z ?? 0.0),
+        ])
+      }
+      worldLandmarks.append(handWorldLandmarkData)
+    }
+
+    return [
+      "gestures": gestures,
+      "handedness": handedness,
+      "landmarks": landmarks,
+      "worldLandmarks": worldLandmarks,
+      "detected": true,
     ]
   }
 }

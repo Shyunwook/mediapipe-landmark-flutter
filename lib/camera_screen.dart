@@ -9,6 +9,8 @@ class CameraScreen extends StatefulWidget {
   State<CameraScreen> createState() => _CameraScreenState();
 }
 
+enum InferenceMode { landmark, gesture }
+
 class _CameraScreenState extends State<CameraScreen> {
   final channel = MethodChannel('channel_Mediapipe');
 
@@ -18,6 +20,12 @@ class _CameraScreenState extends State<CameraScreen> {
   bool _isRecording = false;
   List<Offset> _landmarks = [];
   List<Offset> _previousLandmarks = []; // 이전 프레임 랜드마크 저장
+
+  InferenceMode _inferenceMode = InferenceMode.landmark; // 기본값은 landmark
+
+  // 제스처 정보 저장 변수들
+  String _detectedGesture = '';
+  double _gestureConfidence = 0.0;
 
   CameraController? _controller;
 
@@ -56,7 +64,10 @@ class _CameraScreenState extends State<CameraScreen> {
 
   Future<void> _loadModel() async {
     try {
-      await channel.invokeMethod('load_gesture');
+      String methodName = _inferenceMode == InferenceMode.landmark
+          ? 'load_landmark'
+          : 'load_gesture';
+      await channel.invokeMethod(methodName);
       setState(() {
         _isModelLoaded = true;
       });
@@ -105,41 +116,116 @@ class _CameraScreenState extends State<CameraScreen> {
                     ],
                   ),
           ),
+          // 제스처 정보 표시 영역 (Gesture 모드일 때만 표시)
+          if (_inferenceMode == InferenceMode.gesture && _isRecording)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              margin: const EdgeInsets.symmetric(horizontal: 16),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.7),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.gesture, color: Colors.white, size: 20),
+                  const SizedBox(width: 8),
+                  Text(
+                    _detectedGesture.isEmpty
+                        ? '제스처를 감지 중...'
+                        : '감지된 제스처: $_detectedGesture (${(_gestureConfidence * 100).toStringAsFixed(1)}%)',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           Container(
             padding: const EdgeInsets.all(16),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            child: Column(
               children: [
+                // 모드 선택 버튼
                 Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(
-                      _isModelLoaded ? Icons.check_circle : Icons.error,
-                      color: _isModelLoaded ? Colors.green : Colors.red,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      _isModelLoaded ? 'Model Ready' : 'Loading...',
-                      style: const TextStyle(fontSize: 16),
+                    Text('추론 모드: ', style: TextStyle(fontSize: 16)),
+                    SegmentedButton<InferenceMode>(
+                      segments: const [
+                        ButtonSegment<InferenceMode>(
+                          value: InferenceMode.landmark,
+                          label: Text('Landmark'),
+                        ),
+                        ButtonSegment<InferenceMode>(
+                          value: InferenceMode.gesture,
+                          label: Text('Gesture'),
+                        ),
+                      ],
+                      selected: {_inferenceMode},
+                      onSelectionChanged: (Set<InferenceMode> selected) {
+                        if (_isRecording) {
+                          // 녹화 중일 때는 모드 변경 불가
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('녹화 중에는 모드를 변경할 수 없습니다.'),
+                              duration: Duration(seconds: 2),
+                            ),
+                          );
+                          return;
+                        }
+                        setState(() {
+                          _inferenceMode = selected.first;
+                          _isModelLoaded = false;
+                          // 모드 변경 시 제스처 정보 초기화
+                          _detectedGesture = '';
+                          _gestureConfidence = 0.0;
+                        });
+                        _loadModel();
+                      },
                     ),
                   ],
                 ),
-                ElevatedButton(
-                  onPressed: _toggleRecording,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _isRecording ? Colors.red : Colors.green,
-                    foregroundColor: Colors.white,
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(_isRecording ? Icons.stop : Icons.play_arrow),
-                      const SizedBox(width: 8),
-                      Text(
-                        _isRecording ? '중단' : '촬영 시작',
-                        style: const TextStyle(fontSize: 16),
+                const SizedBox(height: 16),
+                // 기존 컨트롤 버튼들
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          _isModelLoaded ? Icons.check_circle : Icons.error,
+                          color: _isModelLoaded ? Colors.green : Colors.red,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          _isModelLoaded ? 'Model Ready' : 'Loading...',
+                          style: const TextStyle(fontSize: 16),
+                        ),
+                      ],
+                    ),
+                    ElevatedButton(
+                      onPressed: _toggleRecording,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _isRecording
+                            ? Colors.red
+                            : Colors.green,
+                        foregroundColor: Colors.white,
                       ),
-                    ],
-                  ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(_isRecording ? Icons.stop : Icons.play_arrow),
+                          const SizedBox(width: 8),
+                          Text(
+                            _isRecording ? '중단' : '촬영 시작',
+                            style: const TextStyle(fontSize: 16),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -163,42 +249,22 @@ class _CameraScreenState extends State<CameraScreen> {
     try {
       final imageBytes = _cameraImageToBytes(image);
 
-      final result = await channel.invokeMethod('inference', {
+      // 선택된 모드에 따라 다른 method 호출
+      String methodName = _inferenceMode == InferenceMode.landmark
+          ? 'inference_landmark'
+          : 'inference_gesture';
+
+      final result = await channel.invokeMethod(methodName, {
         'imageData': imageBytes,
         'width': image.width,
         'height': image.height,
       });
 
-      if ((result['result']['landmarks'] as List).isNotEmpty) {
-        // BuildContext 안전성 체크
-        if (!mounted) return;
-        // iOS에서 이미 224 스케일로 변환된 좌표를 화면 크기에 맞게 스케일링
-
-        final newLandmarks = (result['result']['landmarks'] as List)
-            .map((mark) => Offset(mark['x'] * 393 / 224, mark['y'] * 480 / 224))
-            .toList();
-
-        // 좌표 스무딩 적용 (in-place 연산으로 메모리 할당 최적화)
-        if (_previousLandmarks.isNotEmpty &&
-            _previousLandmarks.length == newLandmarks.length) {
-          // 기존 _landmarks 배열을 재사용하여 in-place로 계산
-          if (_landmarks.length != newLandmarks.length) {
-            _landmarks = List.filled(newLandmarks.length, Offset.zero);
-          }
-          for (int i = 0; i < newLandmarks.length; i++) {
-            _landmarks[i] = Offset(
-              newLandmarks[i].dx * 0.7 + _previousLandmarks[i].dx * 0.3,
-              newLandmarks[i].dy * 0.7 + _previousLandmarks[i].dy * 0.3,
-            );
-          }
-        } else {
-          _landmarks = newLandmarks;
-        }
-
-        _previousLandmarks = List.from(_landmarks);
+      // 선택된 모드에 따라 다른 파싱 로직 적용
+      if (_inferenceMode == InferenceMode.landmark) {
+        _processLandmarkResult(result);
       } else {
-        _landmarks.clear();
-        _previousLandmarks.clear();
+        _processGestureResult(result);
       }
 
       // 처리 완료 시간 기록 및 성능 로깅
@@ -259,6 +325,104 @@ class _CameraScreenState extends State<CameraScreen> {
       _startImageStream();
     } else {
       _stopImageStream();
+    }
+  }
+
+  // Landmark 결과 파싱 (기존 방식)
+  void _processLandmarkResult(Map result) {
+    if ((result['result']['landmarks'] as List).isNotEmpty) {
+      // BuildContext 안전성 체크
+      if (!mounted) return;
+      // iOS에서 이미 224 스케일로 변환된 좌표를 화면 크기에 맞게 스케일링
+
+      final newLandmarks = (result['result']['landmarks'] as List)
+          .map((mark) => Offset(mark['x'] * 393 / 224, mark['y'] * 480 / 224))
+          .toList();
+
+      // 좌표 스무딩 적용 (in-place 연산으로 메모리 할당 최적화)
+      if (_previousLandmarks.isNotEmpty &&
+          _previousLandmarks.length == newLandmarks.length) {
+        // 기존 _landmarks 배열을 재사용하여 in-place로 계산
+        if (_landmarks.length != newLandmarks.length) {
+          _landmarks = List.filled(newLandmarks.length, Offset.zero);
+        }
+        for (int i = 0; i < newLandmarks.length; i++) {
+          _landmarks[i] = Offset(
+            newLandmarks[i].dx * 0.7 + _previousLandmarks[i].dx * 0.3,
+            newLandmarks[i].dy * 0.7 + _previousLandmarks[i].dy * 0.3,
+          );
+        }
+      } else {
+        _landmarks = newLandmarks;
+      }
+
+      _previousLandmarks = List.from(_landmarks);
+    } else {
+      _landmarks.clear();
+      _previousLandmarks.clear();
+    }
+  }
+
+  // Gesture 결과 파싱 (새로운 방식)
+  void _processGestureResult(Map result) {
+    if ((result['result']['landmarks'] as List).isNotEmpty) {
+      // BuildContext 안전성 체크
+      if (!mounted) return;
+
+      // gesture recognition에서 landmarks는 3차원 배열 [hand][landmark][coordinate]
+      final landmarksArray = result['result']['landmarks'] as List;
+      if (landmarksArray.isNotEmpty) {
+        // 첫 번째 손의 랜드마크만 사용
+        final firstHandLandmarks = landmarksArray[0] as List;
+        // gesture recognition에서 landmarks는 이미 정규화된 좌표 (0.0-1.0)이므로 직접 화면 크기에 곱함
+        final newLandmarks = firstHandLandmarks
+            .map((mark) => Offset(mark['x'] * 393, mark['y'] * 480))
+            .toList();
+
+        // 좌표 스무딩 적용
+        if (_previousLandmarks.isNotEmpty &&
+            _previousLandmarks.length == newLandmarks.length) {
+          if (_landmarks.length != newLandmarks.length) {
+            _landmarks = List.filled(newLandmarks.length, Offset.zero);
+          }
+          for (int i = 0; i < newLandmarks.length; i++) {
+            _landmarks[i] = Offset(
+              newLandmarks[i].dx * 0.7 + _previousLandmarks[i].dx * 0.3,
+              newLandmarks[i].dy * 0.7 + _previousLandmarks[i].dy * 0.3,
+            );
+          }
+        } else {
+          _landmarks = newLandmarks;
+        }
+
+        _previousLandmarks = List.from(_landmarks);
+
+        // Gesture 정보 UI 업데이트
+        if (result['result']['gestures'] != null) {
+          final gestures = result['result']['gestures'] as List;
+          if (gestures.isNotEmpty) {
+            setState(() {
+              _detectedGesture = gestures[0]['categoryName'] ?? '';
+              _gestureConfidence = (gestures[0]['score'] ?? 0.0).toDouble();
+            });
+            debugPrint('감지된 제스처: $_detectedGesture (신뢰도: $_gestureConfidence)');
+          }
+        } else {
+          // 제스처가 감지되지 않은 경우
+          setState(() {
+            _detectedGesture = '';
+            _gestureConfidence = 0.0;
+          });
+        }
+      }
+    } else {
+      _landmarks.clear();
+      _previousLandmarks.clear();
+      // 랜드마크가 없을 때도 제스처 정보 초기화
+      setState(() {
+        _detectedGesture = '';
+        _gestureConfidence = 0.0;
+      });
     }
   }
 }
