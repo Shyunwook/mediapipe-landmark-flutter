@@ -294,6 +294,25 @@ class _CameraScreenState extends State<CameraScreen> {
         _processingTimes[_bufferIndex] = processingTime;
         _bufferIndex = (_bufferIndex + 1) % 30;
       }
+
+      // 처리 완료 시간 기록 및 성능 로깅
+      if (_frameStartTime != null) {
+        final processingTime = DateTime.now()
+            .difference(_frameStartTime!)
+            .inMilliseconds;
+
+        // 원형 버퍼에 저장 (O(1) 연산)
+        _processingTimes[_bufferIndex] = processingTime;
+        _bufferIndex = (_bufferIndex + 1) % 30;
+
+        if (_frameCount % 30 == 0) {
+          final avgTime = _processingTimes.reduce((a, b) => a + b) / 30;
+          final fps = 1000 / avgTime;
+          debugPrint(
+            "🔥 성능 측정 (최근 30프레임): 평균 처리시간=${avgTime.toStringAsFixed(1)}ms, FPS=${fps.toStringAsFixed(1)}",
+          );
+        }
+      }
     } catch (e) {
       debugPrint("Error processing image: $e");
     } finally {
