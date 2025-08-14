@@ -23,7 +23,7 @@ EXTERNAL SOURCES:
     :path: Flutter
 
 SPEC CHECKSUMS:
-  camera_avfoundation: adb0207d868b2d873e895371d88448399ab78d87
+  camera_avfoundation: be3be85408cd4126f250386828e9b1dfa40ab436
   Flutter: e0871f40cf51350855a761d2e70bf5af5b9b5de7
   MediaPipeTasksCommon: 6cfa29170d4900f04d250ad95ec058f14a741f38
   MediaPipeTasksVision: 7b1c0f5a5820e87e9d96926f5e65d8cd3744fac2

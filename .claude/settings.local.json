@@ -3,7 +3,8 @@
     "allow": [
       "WebFetch(domain:ai.google.dev)",
       "Bash(mkdir:*)",
-      "Bash(cp:*)"
+      "Bash(cp:*)",
+      "Bash(flutter run:*)"
     ],
     "deny": [],
     "ask": []
