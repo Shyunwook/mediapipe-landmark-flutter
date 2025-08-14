@@ -269,8 +269,6 @@ class MainActivity : FlutterActivity() {
                 // 7. 결과를 Flutter에서 사용할 수 있는 형태로 파싱
                 val parseResult = parseGestureResult(gestureResult)
                 
-                // 8. 디버깅용 로그 출력
-                Log.d("MainActivity", "Gesture result: $parseResult")
                 
                 // 9. 메인 스레드에서 결과 반환
                 handler.post {
@@ -293,7 +291,6 @@ class MainActivity : FlutterActivity() {
         val expectedYSize = width * height // Y plane size
         val actualSize = imageData.size
         
-        Log.d("MainActivity", "Expected Y plane size: $expectedYSize, Actual size: $actualSize")
         
         // Create RGB bitmap from Y plane (grayscale) - efficient native conversion
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)

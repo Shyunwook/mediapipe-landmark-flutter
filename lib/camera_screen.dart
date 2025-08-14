@@ -1,7 +1,8 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'dart:io';
+import 'common/mediapipe_interface.dart';
+import 'common/mediapipe_factory.dart';
 
 class CameraScreen extends StatefulWidget {
   const CameraScreen({super.key});
@@ -10,13 +11,10 @@ class CameraScreen extends StatefulWidget {
   State<CameraScreen> createState() => _CameraScreenState();
 }
 
-/// MediaPipe 추론 모드 정의
-/// landmark: 손 랜드마크 감지, gesture: 제스처 인식
-enum InferenceMode { landmark, gesture }
 
 class _CameraScreenState extends State<CameraScreen> {
-  /// Android/iOS 네이티브와 통신하는 메소드 채널
-  final channel = MethodChannel('channel_Mediapipe');
+  /// 플랫폼별 MediaPipe 구현체
+  late final MediaPipeInterface _mediaPipe;
 
   // === 카메라 관련 변수들 ===
   late List<CameraDescription> cameras;
@@ -49,13 +47,15 @@ class _CameraScreenState extends State<CameraScreen> {
   @override
   void initState() {
     super.initState();
+    _mediaPipe = MediaPipeFactory.create();
     _asyncInitState();
   }
 
-  /// 앱 초기화: 카메라 설정 → 모델 로딩 순서로 진행
+  /// 앱 초기화: 카메라 설정 → MediaPipe 초기화 → 모델 로딩 순서로 진행
   Future<void> _asyncInitState() async {
     cameras = await availableCameras();
     await _initializeCamera();
+    await _mediaPipe.initialize();
     await _loadModel();
     setState(() {}); // UI 업데이트
   }
@@ -75,16 +75,19 @@ class _CameraScreenState extends State<CameraScreen> {
   /// 현재 추론 모드에 맞는 MediaPipe 모델 로딩
   Future<void> _loadModel() async {
     try {
-      String methodName = _inferenceMode == InferenceMode.landmark
-          ? 'load_landmark' // 랜드마크 모델
-          : 'load_gesture'; // 제스처 인식 모델
-
-      await channel.invokeMethod(methodName);
+      final success = await _mediaPipe.loadModel(_inferenceMode);
       setState(() {
-        _isModelLoaded = true;
+        _isModelLoaded = success;
       });
+      
+      if (!success) {
+        debugPrint("Failed to load ${_inferenceMode.name} model");
+      }
     } catch (e) {
-      debugPrint("Error loading model : $e");
+      debugPrint("Error loading model: $e");
+      setState(() {
+        _isModelLoaded = false;
+      });
     }
   }
 
@@ -264,44 +267,31 @@ class _CameraScreenState extends State<CameraScreen> {
         _cameraRatio = image.height.toDouble() / image.width.toDouble();
       }
 
-      // 3. 이미지 데이터 변환 (YUV420 Y plane 추출)
-      final imageBytes = _cameraImageToBytes(image);
-
-      // 4. 네이티브 MediaPipe 호출
-      String methodName = _inferenceMode == InferenceMode.landmark
-          ? 'inference_landmark'
-          : 'inference_gesture';
-
-      final result = await channel.invokeMethod(methodName, {
-        'imageData': imageBytes,
-        'width': image.width,
-        'height': image.height,
-      });
-
-      // 5. 결과 파싱 및 UI 업데이트
+      // 3. MediaPipe 추론 실행
+      MediaPipeResult result;
       if (_inferenceMode == InferenceMode.landmark) {
-        _processLandmarkResult(result);
+        result = await _mediaPipe.detectLandmarks(image: image);
       } else {
-        _processGestureResult(result);
+        result = await _mediaPipe.recognizeGesture(image: image);
       }
 
-      // 6. 성능 측정 (30프레임 평균)
+      // 4. 결과 파싱 및 UI 업데이트
+      if (result.success) {
+        if (_inferenceMode == InferenceMode.landmark) {
+          _processLandmarkResult(result);
+        } else {
+          _processGestureResult(result);
+        }
+      } else {
+        debugPrint("MediaPipe inference failed: ${result.error}");
+      }
+
+      // 5. 성능 측정 (30프레임 평균)
       if (_frameStartTime != null) {
         final processingTime = DateTime.now()
             .difference(_frameStartTime!)
             .inMilliseconds;
 
-        _processingTimes[_bufferIndex] = processingTime;
-        _bufferIndex = (_bufferIndex + 1) % 30;
-      }
-
-      // 처리 완료 시간 기록 및 성능 로깅
-      if (_frameStartTime != null) {
-        final processingTime = DateTime.now()
-            .difference(_frameStartTime!)
-            .inMilliseconds;
-
-        // 원형 버퍼에 저장 (O(1) 연산)
         _processingTimes[_bufferIndex] = processingTime;
         _bufferIndex = (_bufferIndex + 1) % 30;
 
@@ -322,11 +312,6 @@ class _CameraScreenState extends State<CameraScreen> {
     }
   }
 
-  /// CameraImage를 MediaPipe 입력용 바이트 배열로 변환
-  /// YUV420 포맷에서 Y(휘도) 평면만 추출하여 성능 최적화
-  Uint8List _cameraImageToBytes(CameraImage image) {
-    return image.planes[0].bytes; // Y plane만 사용 (그레이스케일)
-  }
 
   /// 카메라 스트림 시작: 실시간 프레임 처리
   void _startImageStream() {
@@ -374,20 +359,20 @@ class _CameraScreenState extends State<CameraScreen> {
 
   /// 손 랜드마크 감지 결과 처리
   /// MediaPipe 정규화 좌표(0~1)를 화면 픽셀 좌표로 변환
-  void _processLandmarkResult(Map result) {
+  void _processLandmarkResult(MediaPipeResult result) {
     // 촬영 중이 아니면 처리하지 않음 (비동기 처리 타이밍 이슈 방지)
     if (!_isRecording) return;
 
-    if ((result['result']['landmarks'] as List).isNotEmpty) {
+    if (result.landmarks.isNotEmpty) {
       // 위젯이 dispose된 경우 처리 중단
       if (!mounted) return;
 
-      final landmarks = result['result']['landmarks'] as List;
+      final landmarks = result.landmarks;
 
       // 1. 정규화 좌표를 화면 좌표로 변환
       final newLandmarks = landmarks.map((mark) {
-        double x = mark['x']; // 0.0 ~ 1.0
-        double y = mark['y']; // 0.0 ~ 1.0
+        double x = mark['x'] ?? 0.0; // 0.0 ~ 1.0
+        double y = mark['y'] ?? 0.0; // 0.0 ~ 1.0
 
         // 2. Android 전용: 카메라 회전으로 인한 좌우 반전 보정
         if (Platform.isAndroid) {
@@ -430,23 +415,24 @@ class _CameraScreenState extends State<CameraScreen> {
 
   /// 제스처 인식 결과 처리
   /// 랜드마크 + 제스처 정보를 동시에 처리하여 UI 업데이트
-  void _processGestureResult(Map result) {
+  void _processGestureResult(MediaPipeResult result) {
     // 촬영 중이 아니면 처리하지 않음 (비동기 처리 타이밍 이슈 방지)
     if (!_isRecording) return;
 
-    if ((result['result']['landmarks'] as List).isNotEmpty) {
+    final gestureData = result.gestureData;
+    if ((gestureData['landmarks'] as List? ?? []).isNotEmpty) {
       // BuildContext 안전성 체크
       if (!mounted) return;
 
       // gesture recognition에서 landmarks는 3차원 배열 [hand][landmark][coordinate]
-      final landmarksArray = result['result']['landmarks'] as List;
+      final landmarksArray = gestureData['landmarks'] as List;
       if (landmarksArray.isNotEmpty) {
         // 첫 번째 손의 랜드마크만 사용
         final firstHandLandmarks = landmarksArray[0] as List;
         // MediaPipe 정규화 좌표를 CameraPreview 크기에 맞게 변환
         final newLandmarks = firstHandLandmarks.map((mark) {
-          double x = mark['x'];
-          double y = mark['y'];
+          double x = mark['x'] ?? 0.0;
+          double y = mark['y'] ?? 0.0;
 
           // Android: 좌우 반전 처리
           if (Platform.isAndroid) {
@@ -478,8 +464,8 @@ class _CameraScreenState extends State<CameraScreen> {
         _previousLandmarks = List.from(_landmarks);
 
         // Gesture 정보 UI 업데이트
-        if (result['result']['gestures'] != null) {
-          final gestures = result['result']['gestures'] as List;
+        if (gestureData['gestures'] != null) {
+          final gestures = gestureData['gestures'] as List;
           if (gestures.isNotEmpty) {
             setState(() {
               _detectedGesture = gestures[0]['categoryName'] ?? '';
@@ -497,6 +483,13 @@ class _CameraScreenState extends State<CameraScreen> {
     } else {
       _clearAllLandmarks();
     }
+  }
+
+  @override
+  void dispose() {
+    _mediaPipe.dispose();
+    _controller?.dispose();
+    super.dispose();
   }
 }
 
