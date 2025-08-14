@@ -1,6 +1,8 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'dart:io';
+import 'dart:async';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'common/mediapipe_interface.dart';
 import 'common/mediapipe_factory.dart';
 
@@ -43,6 +45,10 @@ class _CameraScreenState extends State<CameraScreen> {
   final List<int> _processingTimes = List.filled(30, 0);
   int _frameCount = 0;
   int _bufferIndex = 0;
+  
+  // === 웹 전용 변수 ===
+  Timer? _webImageTimer;
+  bool _isWebCapturing = false;
 
   @override
   void initState() {
@@ -60,12 +66,30 @@ class _CameraScreenState extends State<CameraScreen> {
     setState(() {}); // UI 업데이트
   }
 
-  /// 카메라 초기화 (전면 카메라, 저해상도 설정)
+  /// 카메라 초기화 (전면 카메라 우선, 저해상도 설정)
   Future<void> _initializeCamera() async {
     if (cameras.isNotEmpty) {
+      // 전면 카메라 찾기 (웹에서는 첫 번째가 전면일 수 있음)
+      CameraDescription selectedCamera;
+      
+      if (kIsWeb) {
+        // 웹: 첫 번째 카메라 사용 (보통 전면 카메라)
+        selectedCamera = cameras.first;
+      } else {
+        // 모바일: 전면 카메라 찾기, 없으면 첫 번째 카메라
+        try {
+          selectedCamera = cameras.firstWhere(
+            (camera) => camera.lensDirection == CameraLensDirection.front,
+            orElse: () => cameras.first,
+          );
+        } catch (e) {
+          selectedCamera = cameras.first;
+        }
+      }
+      
       _controller = CameraController(
-        cameras[1], // 전면 카메라 사용
-        ResolutionPreset.low, // 성능 최적화를 위한 저해상도
+        selectedCamera,
+        kIsWeb ? ResolutionPreset.medium : ResolutionPreset.low, // 웹은 medium 권장
         enableAudio: false, // 오디오 비활성화
       );
       await _controller!.initialize();
@@ -259,7 +283,10 @@ class _CameraScreenState extends State<CameraScreen> {
       _screenWidth = MediaQuery.of(context).size.width;
 
       // 2. 플랫폼별 카메라 비율 계산
-      if (Platform.isAndroid) {
+      if (kIsWeb) {
+        // Web: 카메라 원본 비율 사용
+        _cameraRatio = image.height.toDouble() / image.width.toDouble();
+      } else if (Platform.isAndroid) {
         // Android: 이미지 회전 후 비율 (320/240 = 1.33)
         _cameraRatio = image.width.toDouble() / image.height.toDouble();
       } else {
@@ -316,19 +343,45 @@ class _CameraScreenState extends State<CameraScreen> {
   /// 카메라 스트림 시작: 실시간 프레임 처리
   void _startImageStream() {
     if (_controller != null && _controller!.value.isInitialized) {
-      _controller!.startImageStream((CameraImage image) {
-        // 처리 조건: 처리 중이 아니고, 모델 로딩 완료, 촬영 중
-        if (!_isProcessing && _isModelLoaded && _isRecording) {
-          _processImage(image);
-        }
-      });
+      if (kIsWeb) {
+        // 웹: 이미지 스트림 미지원, 타이머로 스냅샷 촬영
+        _webImageTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) async {
+          // 중복 캡처 방지 및 기본 조건 확인
+          if (!_isProcessing && _isModelLoaded && _isRecording && !_isWebCapturing) {
+            _isWebCapturing = true;
+            try {
+              final XFile imageFile = await _controller!.takePicture();
+              await _processWebImage(imageFile);
+            } catch (e) {
+              debugPrint('Web image capture error: $e');
+            } finally {
+              _isWebCapturing = false;
+            }
+          }
+        });
+      } else {
+        // 모바일: 기존 이미지 스트림 사용
+        _controller!.startImageStream((CameraImage image) {
+          if (!_isProcessing && _isModelLoaded && _isRecording) {
+            _processImage(image);
+          }
+        });
+      }
     }
   }
 
   /// 카메라 스트림 중지
   void _stopImageStream() {
-    if (_controller != null && _controller!.value.isInitialized) {
-      _controller!.stopImageStream();
+    if (kIsWeb) {
+      // 웹: 타이머 중지 및 캡처 상태 초기화
+      _webImageTimer?.cancel();
+      _webImageTimer = null;
+      _isWebCapturing = false;
+    } else {
+      // 모바일: 이미지 스트림 중지
+      if (_controller != null && _controller!.value.isInitialized) {
+        _controller!.stopImageStream();
+      }
     }
   }
 
@@ -374,9 +427,9 @@ class _CameraScreenState extends State<CameraScreen> {
         double x = mark['x'] ?? 0.0; // 0.0 ~ 1.0
         double y = mark['y'] ?? 0.0; // 0.0 ~ 1.0
 
-        // 2. Android 전용: 카메라 회전으로 인한 좌우 반전 보정
-        if (Platform.isAndroid) {
-          x = 1 - x; // 좌우 반전
+        // 2. 플랫폼별 좌표 보정
+        if (!kIsWeb && Platform.isAndroid) {
+          x = 1 - x; // Android: 좌우 반전 보정
         }
 
         // 3. 화면 크기에 맞춰 스케일링
@@ -434,9 +487,9 @@ class _CameraScreenState extends State<CameraScreen> {
           double x = mark['x'] ?? 0.0;
           double y = mark['y'] ?? 0.0;
 
-          // Android: 좌우 반전 처리
-          if (Platform.isAndroid) {
-            x = 1 - x; // 좌우 반전
+          // 플랫폼별 좌표 보정
+          if (!kIsWeb && Platform.isAndroid) {
+            x = 1 - x; // Android: 좌우 반전 보정
           }
 
           return Offset(
@@ -485,8 +538,80 @@ class _CameraScreenState extends State<CameraScreen> {
     }
   }
 
+  /// 웹용 이미지 처리 함수 (XFile 기반)
+  Future<void> _processWebImage(XFile imageFile) async {
+    if (_isProcessing) return;
+
+    _frameStartTime = DateTime.now();
+    _frameCount++;
+
+    setState(() {
+      _isProcessing = true;
+    });
+
+    try {
+      // 화면 비율 계산
+      _screenWidth = MediaQuery.of(context).size.width;
+      _cameraRatio = 0.75; // 웹 카메라 기본 비율
+
+      // MediaPipe 추론 실행 (웹에서는 stub 모드로 시뮬레이션)
+      MediaPipeResult result;
+      if (_inferenceMode == InferenceMode.landmark) {
+        // 웹에서는 null 이미지로 호출 (MediaPipeWeb에서 stub 모드 처리)
+        result = await _mediaPipe.detectLandmarks(image: _createDummyCameraImage());
+      } else {
+        result = await _mediaPipe.recognizeGesture(image: _createDummyCameraImage());
+      }
+
+      // 결과 처리
+      if (result.success) {
+        if (_inferenceMode == InferenceMode.landmark) {
+          _processLandmarkResult(result);
+        } else {
+          _processGestureResult(result);
+        }
+      } else {
+        debugPrint("MediaPipe inference failed: ${result.error}");
+      }
+
+      // 성능 측정
+      if (_frameStartTime != null) {
+        final processingTime = DateTime.now()
+            .difference(_frameStartTime!)
+            .inMilliseconds;
+
+        _processingTimes[_bufferIndex] = processingTime;
+        _bufferIndex = (_bufferIndex + 1) % 30;
+
+        if (_frameCount % 30 == 0) {
+          final avgTime = _processingTimes.reduce((a, b) => a + b) / 30;
+          final fps = 1000 / avgTime;
+          debugPrint(
+            "🌐 웹 성능 (최근 30프레임): 평균 처리시간=${avgTime.toStringAsFixed(1)}ms, FPS=${fps.toStringAsFixed(1)}",
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint("Web image processing error: $e");
+    } finally {
+      setState(() {
+        _isProcessing = false;
+      });
+    }
+  }
+
+  /// 웹에서 사용할 더미 CameraImage 생성
+  /// 주의: 이것은 실제 CameraImage가 아닌 웹에서의 테스트용 null 처리입니다.
+  CameraImage? _createDummyCameraImage() {
+    // 웹에서는 실제 CameraImage를 생성할 수 없으므로 null을 반환
+    // MediaPipe 웹 구현체에서 null 처리를 해야 합니다.
+    return null;
+  }
+
   @override
   void dispose() {
+    _webImageTimer?.cancel(); // 웹 타이머 정리
+    _isWebCapturing = false;  // 캡처 상태 초기화
     _mediaPipe.dispose();
     _controller?.dispose();
     super.dispose();

@@ -31,8 +31,81 @@
 
   <title>mediapipe_channeling_test</title>
   <link rel="manifest" href="manifest.json">
+  
+  <!-- MediaPipe Web SDK with fallback CDNs -->
+  <script>
+    window.MediaPipeLoaded = false;
+    window.MediaPipeError = null;
+    
+    // 여러 CDN 시도 (최신 버전부터 시도)
+    const cdnUrls = [
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.js',
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.11/vision_bundle.js',
+      'https://unpkg.com/@mediapipe/tasks-vision@0.10.14/vision_bundle.js',
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.js',
+      'https://unpkg.com/@mediapipe/tasks-vision@latest/vision_bundle.js',
+    ];
+    
+    let currentCdnIndex = 0;
+    
+    function loadMediaPipeSDK() {
+      if (currentCdnIndex >= cdnUrls.length) {
+        window.MediaPipeError = 'All CDN attempts failed';
+        console.error('❌ Failed to load MediaPipe SDK from all CDNs');
+        return;
+      }
+      
+      const script = document.createElement('script');
+      script.src = cdnUrls[currentCdnIndex];
+      console.log(`🔄 Trying CDN ${currentCdnIndex + 1}:`, script.src);
+      
+      script.onload = function() {
+        console.log('📦 MediaPipe SDK script loaded from:', script.src);
+        // SDK가 실제로 사용 가능한지 확인
+        setTimeout(() => {
+          if (typeof MediaPipeTasksVision !== 'undefined' && MediaPipeTasksVision.FilesetResolver) {
+            window.MediaPipeLoaded = true;
+            window.MediaPipeTasksVision = MediaPipeTasksVision;
+            console.log('✅ MediaPipe SDK verified and ready:', MediaPipeTasksVision);
+          } else {
+            console.warn('⚠️ MediaPipe SDK loaded but MediaPipeTasksVision not available');
+            currentCdnIndex++;
+            loadMediaPipeSDK();
+          }
+        }, 100);
+      };
+      
+      script.onerror = function() {
+        console.warn(`❌ CDN ${currentCdnIndex + 1} failed:`, script.src);
+        currentCdnIndex++;
+        loadMediaPipeSDK(); // 다음 CDN 시도
+      };
+      
+      document.head.appendChild(script);
+    }
+    
+    // MediaPipe SDK 로딩 시작
+    loadMediaPipeSDK();
+  </script>
 </head>
 <body>
+  <script>
+    // MediaPipe 로딩 상태 확인
+    function checkMediaPipeLoading() {
+      if (window.MediaPipeLoaded) {
+        console.log('MediaPipe is ready');
+        return;
+      }
+      if (window.MediaPipeError) {
+        console.error('MediaPipe loading failed:', window.MediaPipeError);
+        return;
+      }
+      // 아직 로딩 중
+      setTimeout(checkMediaPipeLoading, 100);
+    }
+    checkMediaPipeLoading();
+  </script>
+  <script src="js/mediapipe_web.js" defer></script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

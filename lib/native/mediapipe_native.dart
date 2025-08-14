@@ -46,12 +46,19 @@ class MediaPipeNative implements MediaPipeInterface {
 
   @override
   Future<MediaPipeResult> detectLandmarks({
-    required CameraImage image,
+    required CameraImage? image,
   }) async {
     if (!_isModelLoaded || _currentMode != InferenceMode.landmark) {
       return const MediaPipeResult(
         success: false,
         error: 'Landmark model not loaded',
+      );
+    }
+
+    if (image == null) {
+      return const MediaPipeResult(
+        success: false,
+        error: 'Camera image is null',
       );
     }
 
@@ -78,12 +85,19 @@ class MediaPipeNative implements MediaPipeInterface {
 
   @override
   Future<MediaPipeResult> recognizeGesture({
-    required CameraImage image,
+    required CameraImage? image,
   }) async {
     if (!_isModelLoaded || _currentMode != InferenceMode.gesture) {
       return const MediaPipeResult(
         success: false,
         error: 'Gesture model not loaded',
+      );
+    }
+
+    if (image == null) {
+      return const MediaPipeResult(
+        success: false,
+        error: 'Camera image is null',
       );
     }
 

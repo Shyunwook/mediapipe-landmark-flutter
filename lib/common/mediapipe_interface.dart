@@ -68,12 +68,12 @@ abstract class MediaPipeInterface {
 
   /// 손 랜드마크 감지 추론
   Future<MediaPipeResult> detectLandmarks({
-    required CameraImage image,
+    required CameraImage? image,
   });
 
   /// 제스처 인식 추론
   Future<MediaPipeResult> recognizeGesture({
-    required CameraImage image,
+    required CameraImage? image,
   });
 
   /// 리소스 정리
