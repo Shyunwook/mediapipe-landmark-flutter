@@ -23,22 +23,22 @@ class _CameraScreenState extends State<CameraScreen> {
   CameraController? _controller;
 
   // === 앱 상태 관리 변수들 ===
-  bool _isModelLoaded = false;    // MediaPipe 모델 로딩 완료 여부
-  bool _isProcessing = false;     // 현재 프레임 처리 중 여부
-  bool _isRecording = false;      // 촬영(추론) 진행 중 여부
+  bool _isModelLoaded = false; // MediaPipe 모델 로딩 완료 여부
+  bool _isProcessing = false; // 현재 프레임 처리 중 여부
+  bool _isRecording = false; // 촬영(추론) 진행 중 여부
   InferenceMode _inferenceMode = InferenceMode.landmark; // 현재 추론 모드
 
   // === 랜드마크 데이터 관리 ===
-  List<Offset> _landmarks = [];           // 현재 프레임의 랜드마크 좌표들
-  List<Offset> _previousLandmarks = [];   // 이전 프레임 랜드마크 (스무딩용)
+  List<Offset> _landmarks = []; // 현재 프레임의 랜드마크 좌표들
+  List<Offset> _previousLandmarks = []; // 이전 프레임 랜드마크 (스무딩용)
 
   // === 화면 비율 계산 (동적으로 계산됨) ===
-  double _screenWidth = 0.0;   // 디바이스 화면 너비
-  double _cameraRatio = 1.0;   // 카메라 이미지 비율 (height/width)
+  double _screenWidth = 0.0; // 디바이스 화면 너비
+  double _cameraRatio = 1.0; // 카메라 이미지 비율 (height/width)
 
   // === 제스처 인식 결과 저장 ===
-  String _detectedGesture = '';      // 감지된 제스처 이름
-  double _gestureConfidence = 0.0;   // 제스처 인식 신뢰도 (0.0~1.0)
+  String _detectedGesture = ''; // 감지된 제스처 이름
+  double _gestureConfidence = 0.0; // 제스처 인식 신뢰도 (0.0~1.0)
 
   // === 성능 측정 (30프레임 기준 원형 버퍼) ===
   DateTime? _frameStartTime;
@@ -64,9 +64,9 @@ class _CameraScreenState extends State<CameraScreen> {
   Future<void> _initializeCamera() async {
     if (cameras.isNotEmpty) {
       _controller = CameraController(
-        cameras[1],              // 전면 카메라 사용
-        ResolutionPreset.low,    // 성능 최적화를 위한 저해상도
-        enableAudio: false,      // 오디오 비활성화
+        cameras[1], // 전면 카메라 사용
+        ResolutionPreset.veryHigh, // 성능 최적화를 위한 저해상도
+        enableAudio: false, // 오디오 비활성화
       );
       await _controller!.initialize();
     }
@@ -76,9 +76,9 @@ class _CameraScreenState extends State<CameraScreen> {
   Future<void> _loadModel() async {
     try {
       String methodName = _inferenceMode == InferenceMode.landmark
-          ? 'load_landmark'    // 랜드마크 모델
-          : 'load_gesture';    // 제스처 인식 모델
-      
+          ? 'load_landmark' // 랜드마크 모델
+          : 'load_gesture'; // 제스처 인식 모델
+
       await channel.invokeMethod(methodName);
       setState(() {
         _isModelLoaded = true;
@@ -117,7 +117,6 @@ class _CameraScreenState extends State<CameraScreen> {
                           ),
                         ],
                       ),
-
                     ],
                   ),
           ),
@@ -336,10 +335,10 @@ class _CameraScreenState extends State<CameraScreen> {
     });
 
     if (_isRecording) {
-      _startImageStream();       // 촬영 시작
+      _startImageStream(); // 촬영 시작
     } else {
-      _stopImageStream();        // 촬영 중단
-      _clearAllLandmarks();      // 화면에서 랜드마크 제거
+      _stopImageStream(); // 촬영 중단
+      _clearAllLandmarks(); // 화면에서 랜드마크 제거
     }
   }
 
@@ -359,7 +358,7 @@ class _CameraScreenState extends State<CameraScreen> {
   void _processLandmarkResult(Map result) {
     // 촬영 중이 아니면 처리하지 않음 (비동기 처리 타이밍 이슈 방지)
     if (!_isRecording) return;
-    
+
     if ((result['result']['landmarks'] as List).isNotEmpty) {
       // 위젯이 dispose된 경우 처리 중단
       if (!mounted) return;
@@ -378,11 +377,10 @@ class _CameraScreenState extends State<CameraScreen> {
 
         // 3. 화면 크기에 맞춰 스케일링
         return Offset(
-          x * _screenWidth,                    // x 좌표
-          y * _screenWidth * _cameraRatio,     // y 좌표 (비율 적용)
+          x * _screenWidth, // x 좌표
+          y * _screenWidth * _cameraRatio, // y 좌표 (비율 적용)
         );
       }).toList();
-
 
       // 4. 좌표 스무딩 (떨림 방지)
       if (_previousLandmarks.isNotEmpty &&
@@ -393,7 +391,8 @@ class _CameraScreenState extends State<CameraScreen> {
         }
         for (int i = 0; i < newLandmarks.length; i++) {
           _landmarks[i] = Offset(
-            newLandmarks[i].dx * 0.7 + _previousLandmarks[i].dx * 0.3, // 70% 현재 + 30% 이전
+            newLandmarks[i].dx * 0.7 +
+                _previousLandmarks[i].dx * 0.3, // 70% 현재 + 30% 이전
             newLandmarks[i].dy * 0.7 + _previousLandmarks[i].dy * 0.3,
           );
         }
@@ -415,7 +414,7 @@ class _CameraScreenState extends State<CameraScreen> {
   void _processGestureResult(Map result) {
     // 촬영 중이 아니면 처리하지 않음 (비동기 처리 타이밍 이슈 방지)
     if (!_isRecording) return;
-    
+
     if ((result['result']['landmarks'] as List).isNotEmpty) {
       // BuildContext 안전성 체크
       if (!mounted) return;
@@ -486,10 +485,10 @@ class _CameraScreenState extends State<CameraScreen> {
 /// 손의 21개 랜드마크를 빨간 원으로 화면에 그림
 class LandmarkPainter extends CustomPainter {
   final List<Offset> landmarks;
-  
+
   // Paint 객체 정적 캐싱 (메모리 최적화)
-  static Paint? _cachedPaint;        // 메인 랜드마크용
-  static Paint? _cachedShadowPaint;  // 그림자 효과용
+  static Paint? _cachedPaint; // 메인 랜드마크용
+  static Paint? _cachedShadowPaint; // 그림자 효과용
 
   LandmarkPainter(this.landmarks);
 
