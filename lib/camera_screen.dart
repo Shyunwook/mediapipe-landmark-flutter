@@ -65,7 +65,7 @@ class _CameraScreenState extends State<CameraScreen> {
     if (cameras.isNotEmpty) {
       _controller = CameraController(
         cameras[1], // 전면 카메라 사용
-        ResolutionPreset.veryHigh, // 성능 최적화를 위한 저해상도
+        ResolutionPreset.low, // 성능 최적화를 위한 저해상도
         enableAudio: false, // 오디오 비활성화
       );
       await _controller!.initialize();
