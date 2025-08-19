@@ -345,7 +345,7 @@ class _CameraScreenState extends State<CameraScreen> {
     if (_controller != null && _controller!.value.isInitialized) {
       if (kIsWeb) {
         // 웹: 이미지 스트림 미지원, 타이머로 스냅샷 촬영
-        _webImageTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) async {
+        _webImageTimer = Timer.periodic(const Duration(milliseconds: 150), (timer) async {
           // 중복 캡처 방지 및 기본 조건 확인
           if (!_isProcessing && _isModelLoaded && _isRecording && !_isWebCapturing) {
             _isWebCapturing = true;
@@ -428,8 +428,8 @@ class _CameraScreenState extends State<CameraScreen> {
         double y = mark['y'] ?? 0.0; // 0.0 ~ 1.0
 
         // 2. 플랫폼별 좌표 보정
-        if (!kIsWeb && Platform.isAndroid) {
-          x = 1 - x; // Android: 좌우 반전 보정
+        if (kIsWeb || (!kIsWeb && Platform.isAndroid)) {
+          x = 1 - x; // 웹과 Android: 좌우 반전 보정 (미러 모드)
         }
 
         // 3. 화면 크기에 맞춰 스케일링
@@ -488,8 +488,8 @@ class _CameraScreenState extends State<CameraScreen> {
           double y = mark['y'] ?? 0.0;
 
           // 플랫폼별 좌표 보정
-          if (!kIsWeb && Platform.isAndroid) {
-            x = 1 - x; // Android: 좌우 반전 보정
+          if (kIsWeb || (!kIsWeb && Platform.isAndroid)) {
+            x = 1 - x; // 웹과 Android: 좌우 반전 보정 (미러 모드)
           }
 
           return Offset(
@@ -604,7 +604,7 @@ class _CameraScreenState extends State<CameraScreen> {
   /// 주의: 이것은 실제 CameraImage가 아닌 웹에서의 테스트용 null 처리입니다.
   CameraImage? _createDummyCameraImage() {
     // 웹에서는 실제 CameraImage를 생성할 수 없으므로 null을 반환
-    // MediaPipe 웹 구현체에서 null 처리를 해야 합니다.
+    // 대신 JavaScript에서 직접 비디오 프레임을 캡처합니다.
     return null;
   }
 
